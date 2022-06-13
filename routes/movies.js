@@ -1,15 +1,19 @@
 const moviesRouter = require('express').Router();
 const Movie = require('../models/movie');
 const User = require('../models/user');
+const authHelper = require('../helpers/users');
 
-moviesRouter.get('/', (req, res) => {
-  const { user_token } = req.cookies;
-
-  User.findByToken(user_token).then((user) => {
-    User.movies(user.id).then((movies) => {
-      res.send(movies)
-    }).catch(() => res.status(500).send('Error'))
-  }).catch(()=>res.status(401).send('Unauthorized access'))
+moviesRouter.get('/', authHelper.verifyToken, (req, res) => {
+  const { max_duration, color } = req.query;
+  const userId = req.body.decodedToken.userId;
+  Movie.findMany({ filters: { max_duration, color, userId } })
+    .then((movies) => {
+      res.status(200).send(movies);
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(500).send('Error retrieving movies from database');
+    })
 });
 
 moviesRouter.get('/', async (req, res) => {
@@ -37,27 +41,25 @@ moviesRouter.get('/:id', (req, res) => {
     });
 });
 
-moviesRouter.post('/', (req, res) => {
+// I use helper function as a middleware here
+moviesRouter.post('/', authHelper.verifyToken, (req, res) => {
+  const verifiedToken = req.body.decodedToken;
+  delete req.body.decodedToken;
+  const error = Movie.validate(req.body);
 
-  User.findByToken(req.cookies['user_token'])
-    .then((user) => {
-      const error = Movie.validate(req.body);
-      if (error) {
-        res.status(422).json({ validationErrors: error.details });
-      }
-      else {
-        Movie.create({ ...req.body, user_id: user.id })
-          .then((createdMovie) => {
-            res.status(201).json(createdMovie);
-          })
-          .catch((err) => {
-            console.error(err);
-            res.status(500).send('Error saving the movie');
-          });
-      }
-    }
-    )
-    .catch(() => { res.status(401).send('Unauthorized user'); })
+  if (error) {
+    res.status(422).json({ validationErrors: error.details });
+  }
+  else {
+    Movie.create({ ...req.body, user_id: verifiedToken.userId })
+      .then((createdMovie) => {
+        res.status(201).json(createdMovie);
+      })
+      .catch((err) => {
+        console.error(err);
+        res.status(500).send('Error saving the movie');
+      });
+  }
 });
 
 moviesRouter.put('/:id', (req, res) => {
